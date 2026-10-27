@@ -1,0 +1,99 @@
+# Run the Scrunchee fork of Scrob from its published image (see SCRUNCHEE.md).
+#
+# Same as docker-compose.yaml, except the image comes from SCROB_IMAGE and the
+# secrets are read from the environment (a .env file next to this one, or a
+# Portainer stack's environment variables) instead of being written in here:
+#
+#   SCROB_IMAGE=ghcr.io/<owner>/scrob:scrunchee
+#   POSTGRES_PASSWORD=<a password>
+#   SECRET_KEY=<openssl rand -hex 32>
+#   SCROB_PORT=7330        # optional; the port to publish on this host
+#
+# To run a second copy next to an existing one (for testing a change against a
+# copy of your data), use a different SCROB_PORT and `docker compose -p <name>`
+# so it gets its own containers and volumes.
+services:
+  scrob-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scrob
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: scrob
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scrob -d scrob"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  scrob:
+    # The image built from this fork, for example ghcr.io/<owner>/scrob:scrunchee
+    image: ${SCROB_IMAGE:?set SCROB_IMAGE to the fork's image}
+    restart: unless-stopped
+    depends_on:
+      scrob-db:
+        condition: service_healthy
+    ports:
+      - "${SCROB_PORT:-7330}:7330"
+    environment:
+      # ── Database ────────────────────────────────────────────────────────────
+      DATABASE_URL: postgresql+asyncpg://scrob:${POSTGRES_PASSWORD}@scrob-db:5432/scrob
+
+      # ── Security ────────────────────────────────────────────────────────────
+      # Generate with: openssl rand -hex 32
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+
+      # ── Registrations ────────────────────────────────────────────────────────
+      # Registrations are disabled by default. Set to true to allow additional users.
+      # ENABLE_REGISTRATIONS: "true"
+      # REGISTRATION_MAX_ALLOWED_USERS: "0"  # 0 = unlimited
+
+      # Days a login lasts when "Stay logged in" is ticked (7 days otherwise)
+      # SESSION_REMEMBER_DAYS: "30"
+
+      # ── Nuvio (optional) ───────────────────────────────────────────────────
+      # Set this to the anon/public key when using a self-hosted Nuvio backend.
+      # NUVIO_APP_ANON_KEY: ""
+
+      # ── ARVIO (optional) ────────────────────────────────────────────────────
+      # Overrides the embedded public anon key for auth.arvio.tv. Leave unset
+      # to use the official key.
+      # ARVIO_APP_ANON_KEY: ""
+
+      # ── OIDC (optional) ─────────────────────────────────────────────────────
+      # OIDC_ENABLED: "false"
+      # OIDC_PROVIDER_NAME: SSO
+      # OIDC_CLIENT_ID: ""
+      # OIDC_CLIENT_SECRET: ""
+      # OIDC_AUTH_URL: ""
+      # OIDC_TOKEN_URL: ""
+      # OIDC_USERINFO_URL: ""
+      # OIDC_REDIRECT_URL: http://your-server:7330/oidc-callback
+      # OIDC_DISCOVERY_URL: https://your-idp.example.com/.well-known/openid-configuration   # recommended — enables id_token verification + (issuer, sub) binding
+      # OIDC_ISSUER: ""        # explicit fallback when discovery isn't available
+      # OIDC_JWKS_URL: ""      # explicit fallback when discovery isn't available
+      # OIDC_LOGOUT_URL: ""    # end_session endpoint; populated from discovery when unset
+      # OIDC_POST_LOGOUT_REDIRECT_URL: ""   # defaults to SERVER_URL + /login
+      # OIDC_SCOPES: "openid email profile"
+      # OIDC_IDENTIFIER_FIELD: email         # only used in compat (no-discovery) mode
+      # OIDC_AUTO_CREATE_USERS: "true"
+      # OIDC_DISABLE_PASSWORD_LOGIN: "false"
+      # OIDC_PKCE: "true"      # escape hatch; leave on unless the IdP breaks on PKCE
+
+      # ── User & timezone ──────────────────────────────────────────────────────
+      # Run the process as a specific user/group (defaults to 1000:1000)
+      # PUID: "1000"
+      # PGID: "1000"
+      TZ: ${TZ:-UTC}
+
+      # ── Advanced ─────────────────────────────────────────────────────────────
+      # Override the internal backend port (only needed if 7331 conflicts on bare metal installations)
+      # BACKEND_PORT: "7331"
+    volumes:
+      - scrob_data:/app/backend/data
+
+volumes:
+  db_data:
+  scrob_data:

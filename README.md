@@ -13,6 +13,8 @@
 
 ---
 
+> **Scrunchee fork:** this is a fork of ellite/scrob with a few extra API endpoints and pages. See [SCRUNCHEE.md](SCRUNCHEE.md) for what it adds and how to run it.
+
 Scrob syncs your libraries from **Jellyfin**, **Plex**, **Emby**, **Nuvio**, **ARVIO**, and **Stremio**, tracks your watch history, ratings, and personal lists, and can push watched activity back to connected providers - all from a clean, app-like web interface that installs as a PWA on any device.
 
 ## Table of Contents
