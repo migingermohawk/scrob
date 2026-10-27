@@ -1866,7 +1866,8 @@ async def drop_show(
 
 @router.delete("/drop/show")
 async def undrop_show(
-    show_id: int = Query(...),
+    show_id: int | None = Query(None),
+    tmdb_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
@@ -1874,6 +1875,13 @@ async def undrop_show(
     settings = settings_result.scalar_one_or_none()
     if not settings:
         raise HTTPException(status_code=404, detail="Settings not found")
+    if not (show_id and show_id > 0) and tmdb_id:
+        # Same as undropping a movie by tmdb_id: only an existing local row can
+        # have been dropped, so nothing is created here.
+        existing = (await db.execute(select(Show).where(Show.tmdb_id == tmdb_id))).scalars().first()
+        show_id = existing.id if existing else None
+    if not show_id:
+        return {"status": "ok"}
     dropped = list(settings.dropped_shows or [])
     if show_id in dropped:
         dropped.remove(show_id)
@@ -1976,6 +1984,82 @@ async def undrop_movie(
             flag_modified(settings, "dropped_movies")
             await db.commit()
     return {"status": "ok"}
+
+
+@router.get("/watched-ids")
+async def watched_ids(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
+):
+    """TMDB ids a client can use to hide already-seen titles from discovery
+    rows: every movie with a completed watch, every show whose aired
+    non-special episodes are all watched, and every dropped movie and show.
+    Ids only, so it is one cheap call instead of paging GET /history. A show
+    counts as watched only once it is fully watched (per season, capped
+    against capped_season_episode_counts, the same definition
+    total_aired_episodes and the Next Up remaining counts use), so a show
+    still in progress is not hidden."""
+    movie_rows = await db.execute(
+        select(func.distinct(Media.tmdb_id))
+        .select_from(WatchEvent)
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.completed == True,
+            Media.media_type == MediaType.movie,
+            Media.tmdb_id.isnot(None),
+        )
+    )
+    movies = sorted(row[0] for row in movie_rows.all())
+
+    episode_rows = await db.execute(
+        select(Media.show_id, Media.season_number, func.count(func.distinct(Media.episode_number)))
+        .select_from(WatchEvent)
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(
+            WatchEvent.user_id == current_user.id,
+            WatchEvent.completed == True,
+            Media.media_type == MediaType.episode,
+            Media.show_id.isnot(None),
+            Media.season_number.isnot(None),
+            Media.season_number != 0,
+            Media.episode_number.isnot(None),
+        )
+        .group_by(Media.show_id, Media.season_number)
+    )
+    watched_per_show: dict[int, dict[int, int]] = {}
+    for show_id, season_number, count in episode_rows.all():
+        watched_per_show.setdefault(show_id, {})[season_number] = count
+
+    shows: list[int] = []
+    if watched_per_show:
+        show_rows = (await db.execute(select(Show).where(Show.id.in_(list(watched_per_show))))).scalars().all()
+        for show in show_rows:
+            if not show.tmdb_id:
+                continue
+            season_counts = {sn: cnt for sn, cnt in capped_season_episode_counts(show).items() if sn != 0}
+            total = sum(season_counts.values())
+            if total <= 0:
+                continue
+            per_season = watched_per_show[show.id]
+            watched = sum(min(per_season.get(sn, 0), cnt) for sn, cnt in season_counts.items())
+            if watched >= total:
+                shows.append(show.tmdb_id)
+    shows.sort()
+
+    settings = (await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))).scalar_one_or_none()
+    dropped_movie_ids = list(settings.dropped_movies or []) if settings else []
+    dropped_show_ids = list(settings.dropped_shows or []) if settings else []
+    dropped_movies: list[int] = []
+    if dropped_movie_ids:
+        rows = await db.execute(select(Media.tmdb_id).where(Media.id.in_(dropped_movie_ids), Media.tmdb_id.isnot(None)))
+        dropped_movies = sorted(row[0] for row in rows.all())
+    dropped_shows: list[int] = []
+    if dropped_show_ids:
+        rows = await db.execute(select(Show.tmdb_id).where(Show.id.in_(dropped_show_ids), Show.tmdb_id.isnot(None)))
+        dropped_shows = sorted(row[0] for row in rows.all())
+
+    return {"movies": movies, "shows": shows, "dropped_movies": dropped_movies, "dropped_shows": dropped_shows}
 
 
 @router.get("/dropped")
