@@ -31,6 +31,7 @@ from models.users import User
 from models.profile import UserProfileData, PrivacyLevel
 from models.events import WatchEvent
 from models.collection import Collection
+from models.base import MediaType
 from models.media import Media
 from models.ratings import Rating
 from models.show import Show as ShowModel
@@ -39,6 +40,7 @@ from models.lists import List as ListModel, ListItem
 from models.follows import Follow
 from models.global_settings import GlobalSettings
 from core.config import settings
+from core.identity import find_media
 import schemas
 
 router = APIRouter()
@@ -1182,6 +1184,54 @@ async def get_top_rated_shows(
         "total_results": total,
         "results": results,
     }
+
+
+@router.get("/{user_id}/rating")
+async def get_user_rating_for_media(
+    user_id: int,
+    tmdb_id: int,
+    media_type: str,
+    season_number: Optional[int] = Query(None),
+    episode_order: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
+):
+    """One user's rating for one title. The top-rated lists only give a
+    paginated list sorted by rating, which does not scale to looking up a
+    rating per person shown on a page (a friend's rating next to their
+    comment, or a rating averaged over the people you follow). Uses the same
+    privacy rules as the rest of the profile."""
+    await _check_profile_access(user_id, current_user, db)
+
+    from routers.ratings import format_rating
+
+    try:
+        mt = MediaType(media_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
+
+    media = await find_media(db, mt, tmdb_id=tmdb_id)
+    if not media:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    effective_season = None if mt == MediaType.episode else season_number
+    effective_episode_order = (
+        episode_order if mt == MediaType.series and effective_season is not None else None
+    )
+
+    rating_result = await db.execute(
+        select(Rating).where(
+            Rating.media_id == media.id,
+            Rating.user_id == user_id,
+            Rating.season_number == effective_season,
+            Rating.episode_order == effective_episode_order,
+        )
+    )
+    rating = rating_result.scalar_one_or_none()
+    if not rating:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    return format_rating(rating, media)
 
 
 _RECENTLY_WATCHED_PAGE_SIZE = 24
