@@ -556,14 +556,20 @@ async def _directory_cards(db: AsyncSession, rows, current_user: Optional[User])
     )
     followers_map = dict(followers_q.all())
 
-    # Which of these users is the current viewer already following?
+    # Which of these users does the viewer follow, and which follow the viewer?
     following_set: set[int] = set()
+    follower_set: set[int] = set()
     if current_user:
         fol_q = await db.execute(
             select(Follow.following_id)
             .where(Follow.follower_id == current_user.id, Follow.following_id.in_(user_ids))
         )
         following_set = {row[0] for row in fol_q.all()}
+        back_q = await db.execute(
+            select(Follow.follower_id)
+            .where(Follow.following_id == current_user.id, Follow.follower_id.in_(user_ids))
+        )
+        follower_set = {row[0] for row in back_q.all()}
 
     results = []
     for u, p in rows:
@@ -580,49 +586,57 @@ async def _directory_cards(db: AsyncSession, rows, current_user: Optional[User])
             "total_rated": rated_map.get(u.id, 0),
             "follower_count": followers_map.get(u.id, 0),
             "is_following": u.id in following_set,
+            "is_follower": u.id in follower_set,
             "is_self": current_user is not None and current_user.id == u.id,
         })
 
     return results
 
 
+_DIRECTORY_PAGE_SIZE = 24
+
+
 @router.get("/search")
 async def search_users(
     q: str = "",
+    page: int = Query(1, ge=1),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
-    """Unlike viewing a single profile/list by ID, this is a directory-style
-    enumeration of every public/friends_only user matching a pattern, so it
-    stays behind real authentication regardless of the enable_logged_out_navigation
-    toggle, there's no anonymous "browse all public users" use case to support."""
-    if len(q.strip()) < 1:
-        return {"results": []}
+    """Directory-style enumeration of every public/friends_only user (plus the
+    caller), optionally filtered by a username or display-name pattern. With no
+    `q` it pages through everyone visible, so a people directory needs no
+    search term first. It stays behind real authentication regardless of the
+    enable_logged_out_navigation toggle: there is no anonymous "browse all
+    users" use case to support."""
+    visible = (
+        UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only])
+    ) | (User.id == current_user.id)
 
-    pattern = f"%{q.strip()}%"
-
-    # Match on username or display_name, only public profiles (+ own profile)
-    users_q = await db.execute(
-        select(User, UserProfileData)
-        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
-        .where(
-            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)),
-            (UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only]))
-            | (User.id == current_user.id),
+    base_q = select(User, UserProfileData).outerjoin(UserProfileData, UserProfileData.user_id == User.id)
+    stripped = q.strip()
+    if stripped:
+        pattern = f"%{stripped}%"
+        base_q = base_q.where(
+            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)), visible
         )
-        .order_by(User.username)
-        .limit(24)
-    )
-    rows = users_q.all()
-    if not rows:
-        return {"results": []}
+    else:
+        base_q = base_q.where(visible)
 
-    results = await _directory_cards(db, rows, current_user)
-
-    return {"results": results}
-
-
-_FOLLOW_LIST_PAGE_SIZE = 24
+    total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
+    rows = (
+        await db.execute(
+            base_q.order_by(User.username)
+            .offset((page - 1) * _DIRECTORY_PAGE_SIZE)
+            .limit(_DIRECTORY_PAGE_SIZE)
+        )
+    ).all()
+    return {
+        "results": await _directory_cards(db, rows, current_user) if rows else [],
+        "page": page,
+        "total_pages": max(1, -(-total // _DIRECTORY_PAGE_SIZE)),
+        "total_results": total,
+    }
 
 
 async def _follow_list(
@@ -646,14 +660,14 @@ async def _follow_list(
     rows = (
         await db.execute(
             base_q.order_by(Follow.created_at.desc(), User.id)
-            .offset((page - 1) * _FOLLOW_LIST_PAGE_SIZE)
-            .limit(_FOLLOW_LIST_PAGE_SIZE)
+            .offset((page - 1) * _DIRECTORY_PAGE_SIZE)
+            .limit(_DIRECTORY_PAGE_SIZE)
         )
     ).all()
     return {
         "results": await _directory_cards(db, rows, current_user) if rows else [],
         "page": page,
-        "total_pages": max(1, -(-total // _FOLLOW_LIST_PAGE_SIZE)),
+        "total_pages": max(1, -(-total // _DIRECTORY_PAGE_SIZE)),
         "total_results": total,
     }
 

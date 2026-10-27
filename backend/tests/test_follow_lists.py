@@ -146,8 +146,39 @@ class FollowListTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(results[0]["is_following"])
         self.assertEqual(sorted(results[0]), sorted(
             ["id", "username", "display_name", "avatar_url", "country", "movies_watched", "shows_watched",
-             "total_collected", "total_rated", "follower_count", "is_following", "is_self"]
+             "total_collected", "total_rated", "follower_count", "is_following", "is_follower", "is_self"]
         ))
+
+
+    async def test_search_without_a_query_pages_through_everyone_visible(self):
+        resp = await self.client.get("/profile/search", params={"api_key": "k-alice"})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        # alice, bob and dave are visible; carol's profile is private
+        self.assertEqual([r["username"] for r in body["results"]], ["alice", "bob", "dave"])
+        self.assertEqual((body["page"], body["total_pages"], body["total_results"]), (1, 1, 3))
+
+    async def test_search_shows_a_private_profile_to_its_owner(self):
+        resp = await self.client.get("/profile/search", params={"api_key": "k-carol"})
+        self.assertIn("carol", [r["username"] for r in resp.json()["results"]])
+
+    async def test_search_marks_who_follows_the_viewer_back(self):
+        resp = await self.client.get("/profile/search", params={"api_key": "k-alice"})
+        by_name = {r["username"]: r for r in resp.json()["results"]}
+        self.assertTrue(by_name["bob"]["is_following"] and by_name["bob"]["is_follower"], "alice and bob follow each other")
+        self.assertTrue(by_name["dave"]["is_following"] and not by_name["dave"]["is_follower"])
+
+    async def test_search_pages_after_24_people(self):
+        async with self.Session() as s:
+            for i in range(30):
+                uid = 100 + i
+                s.add(User(id=uid, email=f"u{i}@example.com", username=f"user{i:02d}", api_key=f"k-u{i}"))
+                s.add(UserProfileData(user_id=uid, privacy_level=PrivacyLevel.public))
+            await s.commit()
+        first = (await self.client.get("/profile/search", params={"api_key": "k-alice"})).json()
+        second = (await self.client.get("/profile/search", params={"api_key": "k-alice", "page": 2})).json()
+        self.assertEqual((len(first["results"]), len(second["results"])), (24, 9))
+        self.assertEqual((first["total_pages"], first["total_results"]), (2, 33))
 
 
 if __name__ == "__main__":
