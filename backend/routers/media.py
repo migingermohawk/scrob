@@ -3010,9 +3010,78 @@ async def new_episodes(
 
 
 
+def _recent_collected_show_ids_stmt(user_id: int, limit: int):
+    """The user's most recently collected shows (TMDB ids, newest first).
+
+    GROUP BY + max(added_at), not `SELECT DISTINCT tmdb_id ... ORDER BY
+    added_at`: PostgreSQL rejects the latter ("for SELECT DISTINCT, ORDER BY
+    expressions must appear in select list"). SQLite accepts it, so that shape
+    would only ever fail against the real database.
+    """
+    return (
+        select(ShowModel.tmdb_id)
+        .join(Media, Media.show_id == ShowModel.id)
+        .join(Collection, Collection.media_id == Media.id)
+        .where(Collection.user_id == user_id)
+        .group_by(ShowModel.tmdb_id)
+        .order_by(func.max(Collection.added_at).desc())
+        .limit(limit)
+    )
+
+
+# A recommendation is only as good as the title it is based on, so the person's
+# own rating steers which titles seed it: titles rated below this never seed
+# one, and well-liked titles seed more often and can seed even when they were
+# not collected recently. Ratings are 0-10.
+REC_SEED_MIN_RATING = 6.0
+REC_SEED_LOVED_RATING = 8.0
+REC_SEED_LOVED_WEIGHT = 3
+
+
+def _pick_recommendation_seeds(
+    recent_ids: list[int],
+    loved_ids: list[int],
+    ratings: dict[int, float],
+    count: int,
+    rng,
+) -> list[int]:
+    """Choose up to `count` seed tmdb_ids for the recommendation lookups.
+
+    The pool is the recently collected titles plus the ones rated at least
+    REC_SEED_LOVED_RATING; anything rated below REC_SEED_MIN_RATING is left
+    out. Loved titles are REC_SEED_LOVED_WEIGHT times as likely to be picked,
+    everything else (unrated included) counts once. Drawn without replacement.
+    """
+    pool: list[int] = []
+    for tmdb_id in [*recent_ids, *loved_ids]:
+        if tmdb_id in pool:
+            continue
+        rating = ratings.get(tmdb_id)
+        if rating is not None and rating < REC_SEED_MIN_RATING:
+            continue
+        pool.append(tmdb_id)
+
+    def weight(tmdb_id: int) -> int:
+        rating = ratings.get(tmdb_id)
+        return REC_SEED_LOVED_WEIGHT if rating is not None and rating >= REC_SEED_LOVED_RATING else 1
+
+    picked: list[int] = []
+    while pool and len(picked) < count:
+        choice = rng.choices(pool, weights=[weight(i) for i in pool], k=1)[0]
+        picked.append(choice)
+        pool.remove(choice)
+    return picked
+
+
+# Recommendations seeded from the user's own most recently collected
+# movies and shows (unlike for-you above, which discovers by genre preference
+# alone): a per-title TMDB recommendations lookup for a few seeds, filtered by
+# the user's liked and disliked genres, leaving out what is already collected
+# or dropped. The function existed without a route; this registers it.
+@router.get("/recommended")
 async def recommended(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     import random
     from models.profile import UserProfileData
@@ -3063,19 +3132,41 @@ async def recommended(
     )
     recent_movie_ids = [row[0] for row in recent_movies_q.all() if row[0] not in dropped_movie_tmdb_ids]
 
-    recent_shows_q = await db.execute(
-        select(ShowModel.tmdb_id)
-        .join(Media, Media.show_id == ShowModel.id)
-        .join(Collection, Collection.media_id == Media.id)
-        .where(Collection.user_id == current_user.id)
-        .order_by(Collection.added_at.desc())
-        .distinct()
-        .limit(5)
-    )
+    recent_shows_q = await db.execute(_recent_collected_show_ids_stmt(current_user.id, 5))
     recent_show_ids = [row[0] for row in recent_shows_q.all() if row[0] not in dropped_show_tmdb_ids]
 
-    seed_movies = random.sample(recent_movie_ids, min(3, len(recent_movie_ids)))
-    seed_shows = random.sample(recent_show_ids, min(2, len(recent_show_ids)))
+    # The person's own ratings (whole movie or whole show, not a season or an
+    # episode) steer which titles are used as seeds.
+    rated_q = await db.execute(
+        select(Media.tmdb_id, Media.media_type, Rating.rating)
+        .join(Media, Rating.media_id == Media.id)
+        .where(
+            Rating.user_id == current_user.id,
+            Rating.season_number.is_(None),
+            Rating.episode_order.is_(None),
+            Rating.rating.isnot(None),
+            Media.media_type.in_([MediaType.movie, MediaType.series]),
+        )
+    )
+    movie_ratings: dict[int, float] = {}
+    show_ratings: dict[int, float] = {}
+    for rated_tmdb_id, rated_type, rated_value in rated_q.all():
+        (movie_ratings if rated_type == MediaType.movie else show_ratings)[rated_tmdb_id] = rated_value
+
+    def loved(ratings: dict[int, float], dropped: set[int]) -> list[int]:
+        best = sorted(
+            (i for i, r in ratings.items() if r >= REC_SEED_LOVED_RATING and i not in dropped),
+            key=lambda i: ratings[i],
+            reverse=True,
+        )
+        return best[:10]
+
+    seed_movies = _pick_recommendation_seeds(
+        recent_movie_ids, loved(movie_ratings, dropped_movie_tmdb_ids), movie_ratings, 3, random
+    )
+    seed_shows = _pick_recommendation_seeds(
+        recent_show_ids, loved(show_ratings, dropped_show_tmdb_ids), show_ratings, 2, random
+    )
 
     semaphore = asyncio.Semaphore(10)
 
