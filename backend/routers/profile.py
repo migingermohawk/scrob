@@ -913,12 +913,58 @@ async def get_public_profile(
         for tmdb_id, title, poster_path in mq.all():
             movie_titles[tmdb_id] = (title, poster_path)
 
+    # The person's own rating next to each comment: for movie, series and
+    # season comments. Episode comments are skipped: a comment stores the
+    # show's tmdb_id for those, while an episode rating is keyed on the
+    # episode's own id, so nothing on the comment leads to the right rating.
+    movie_rating_media_ids: dict[int, int] = {}  # movie tmdb_id -> media.id
+    series_rating_media_ids: dict[int, int] = {}  # series tmdb_id -> media.id
+
+    if movie_tmdb_ids:
+        rmq = await db.execute(
+            select(Media.tmdb_id, Media.id).where(Media.tmdb_id.in_(movie_tmdb_ids), Media.media_type == "movie")
+        )
+        for tmdb_id, media_id in rmq.all():
+            movie_rating_media_ids.setdefault(tmdb_id, media_id)
+
+    rated_series_tmdb_ids = list(
+        {c.tmdb_id for c in comments_list if c.media_type in ("series", "season") and c.tmdb_id}
+    )
+    if rated_series_tmdb_ids:
+        rsq = await db.execute(
+            select(Media.tmdb_id, Media.id).where(Media.tmdb_id.in_(rated_series_tmdb_ids), Media.media_type == "series")
+        )
+        for tmdb_id, media_id in rsq.all():
+            series_rating_media_ids.setdefault(tmdb_id, media_id)
+
+    rating_media_ids = list(set(movie_rating_media_ids.values()) | set(series_rating_media_ids.values()))
+    ratings_by_key: dict[tuple[int, Optional[int]], float] = {}
+    if rating_media_ids:
+        rq = await db.execute(
+            select(Rating.media_id, Rating.season_number, Rating.rating).where(
+                Rating.media_id.in_(rating_media_ids),
+                Rating.user_id == user_id,
+                Rating.episode_order.is_(None),
+            )
+        )
+        for media_id, season_number, rating_value in rq.all():
+            ratings_by_key[(media_id, season_number)] = rating_value
+
     recent_comments = []
     for c in comments_list:
         if c.media_type in ("series", "season", "episode"):
             info = show_titles.get(c.tmdb_id) if c.tmdb_id else show_tvdb_titles.get(c.tvdb_id)
         else:
             info = movie_titles.get(c.tmdb_id)
+
+        user_rating = None
+        if c.media_type == "movie" and c.tmdb_id in movie_rating_media_ids:
+            user_rating = ratings_by_key.get((movie_rating_media_ids[c.tmdb_id], None))
+        elif c.media_type == "series" and c.tmdb_id in series_rating_media_ids:
+            user_rating = ratings_by_key.get((series_rating_media_ids[c.tmdb_id], None))
+        elif c.media_type == "season" and c.tmdb_id in series_rating_media_ids:
+            user_rating = ratings_by_key.get((series_rating_media_ids[c.tmdb_id], c.season_number))
+
         recent_comments.append({
             "id": c.id,
             "content": c.content,
@@ -930,6 +976,7 @@ async def get_public_profile(
             "title": info[0] if info else None,
             "poster_path": info[1] if info else None,
             "created_at": c.created_at.isoformat(),
+            "user_rating": user_rating,
             "wetrakr_comment_id": c.wetrakr_comment_id,
             "wetrakr_source": (c.wetrakr_source or "wetrakr") if c.wetrakr_comment_id else None,
         })
@@ -1331,6 +1378,12 @@ async def get_recently_watched_shows(
     }
 
 
+def _format_rating_distribution(rows) -> list[dict]:
+    """(rating, count) rows -> the `{"rating", "count"}` list the stats
+    response sends for each rating distribution."""
+    return [{"rating": float(r), "count": c} for r, c in rows]
+
+
 @router.get("/{user_id}/stats")
 async def get_user_stats(
     user_id: int,
@@ -1549,9 +1602,27 @@ async def get_user_stats(
         .group_by(Rating.rating)
         .order_by(Rating.rating)
     )
-    rating_distribution = [
-        {"rating": float(r), "count": c} for r, c in rating_dist_q.all()
-    ]
+    rating_distribution = _format_rating_distribution(rating_dist_q.all())
+
+    # The same distribution split by media type, so a client can chart movies
+    # against shows; `rating_distribution` above stays the combined one.
+    async def _rating_distribution_for(media_type: str) -> list[dict]:
+        by_type_q = await db.execute(
+            select(Rating.rating, func.count(Rating.id).label("cnt"))
+            .join(Media, Rating.media_id == Media.id)
+            .where(
+                Rating.user_id == user_id,
+                Rating.rating.isnot(None),
+                Media.media_type == media_type,
+                *rating_date_filters,
+            )
+            .group_by(Rating.rating)
+            .order_by(Rating.rating)
+        )
+        return _format_rating_distribution(by_type_q.all())
+
+    rating_distribution_movies = await _rating_distribution_for("movie")
+    rating_distribution_shows = await _rating_distribution_for("series")
 
     avg_movie_rating_q = await db.execute(
         select(func.avg(Rating.rating))
@@ -1695,6 +1766,8 @@ async def get_user_stats(
         "watch_activity": watch_activity,
         "watch_time_activity": watch_time_activity,
         "rating_distribution": rating_distribution,
+        "rating_distribution_movies": rating_distribution_movies,
+        "rating_distribution_shows": rating_distribution_shows,
         "avg_movie_rating": avg_movie_rating,
         "avg_show_rating": avg_show_rating,
         "top_movie_genres": top_movie_genres,
