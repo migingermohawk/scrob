@@ -500,37 +500,11 @@ async def get_avatar(
     return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
 
 
-@router.get("/search")
-async def search_users(
-    q: str = "",
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Unlike viewing a single profile/list by ID, this is a directory-style
-    enumeration of every public/friends_only user matching a pattern, so it
-    stays behind real authentication regardless of the enable_logged_out_navigation
-    toggle, there's no anonymous "browse all public users" use case to support."""
-    if len(q.strip()) < 1:
-        return {"results": []}
-
-    pattern = f"%{q.strip()}%"
-
-    # Match on username or display_name, only public profiles (+ own profile)
-    users_q = await db.execute(
-        select(User, UserProfileData)
-        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
-        .where(
-            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)),
-            (UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only]))
-            | (User.id == current_user.id),
-        )
-        .order_by(User.username)
-        .limit(24)
-    )
-    rows = users_q.all()
-    if not rows:
-        return {"results": []}
-
+async def _directory_cards(db: AsyncSession, rows, current_user: Optional[User]) -> list[dict]:
+    """Directory cards (identity plus watched, collected, rated and follower
+    counts, and whether the viewer follows each person) for (User, profile)
+    rows. Shared by user search and the following/followers lists so they
+    return the same shape."""
     user_ids = [u.id for u, _ in rows]
 
     # Batch stats
@@ -598,6 +572,42 @@ async def search_users(
             "is_following": u.id in following_set,
             "is_self": current_user is not None and current_user.id == u.id,
         })
+
+    return results
+
+
+@router.get("/search")
+async def search_users(
+    q: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
+):
+    """Unlike viewing a single profile/list by ID, this is a directory-style
+    enumeration of every public/friends_only user matching a pattern, so it
+    stays behind real authentication regardless of the enable_logged_out_navigation
+    toggle, there's no anonymous "browse all public users" use case to support."""
+    if len(q.strip()) < 1:
+        return {"results": []}
+
+    pattern = f"%{q.strip()}%"
+
+    # Match on username or display_name, only public profiles (+ own profile)
+    users_q = await db.execute(
+        select(User, UserProfileData)
+        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
+        .where(
+            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)),
+            (UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only]))
+            | (User.id == current_user.id),
+        )
+        .order_by(User.username)
+        .limit(24)
+    )
+    rows = users_q.all()
+    if not rows:
+        return {"results": []}
+
+    results = await _directory_cards(db, rows, current_user)
 
     return {"results": results}
 
