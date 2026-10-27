@@ -3010,9 +3010,34 @@ async def new_episodes(
 
 
 
+def _recent_collected_show_ids_stmt(user_id: int, limit: int):
+    """The user's most recently collected shows (TMDB ids, newest first).
+
+    GROUP BY + max(added_at), not `SELECT DISTINCT tmdb_id ... ORDER BY
+    added_at`: PostgreSQL rejects the latter ("for SELECT DISTINCT, ORDER BY
+    expressions must appear in select list"). SQLite accepts it, so that shape
+    would only ever fail against the real database.
+    """
+    return (
+        select(ShowModel.tmdb_id)
+        .join(Media, Media.show_id == ShowModel.id)
+        .join(Collection, Collection.media_id == Media.id)
+        .where(Collection.user_id == user_id)
+        .group_by(ShowModel.tmdb_id)
+        .order_by(func.max(Collection.added_at).desc())
+        .limit(limit)
+    )
+
+
+# Recommendations seeded from the user's own most recently collected
+# movies and shows (unlike for-you above, which discovers by genre preference
+# alone): a per-title TMDB recommendations lookup for a few seeds, filtered by
+# the user's liked and disliked genres, leaving out what is already collected
+# or dropped. The function existed without a route; this registers it.
+@router.get("/recommended")
 async def recommended(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     import random
     from models.profile import UserProfileData
@@ -3063,15 +3088,7 @@ async def recommended(
     )
     recent_movie_ids = [row[0] for row in recent_movies_q.all() if row[0] not in dropped_movie_tmdb_ids]
 
-    recent_shows_q = await db.execute(
-        select(ShowModel.tmdb_id)
-        .join(Media, Media.show_id == ShowModel.id)
-        .join(Collection, Collection.media_id == Media.id)
-        .where(Collection.user_id == current_user.id)
-        .order_by(Collection.added_at.desc())
-        .distinct()
-        .limit(5)
-    )
+    recent_shows_q = await db.execute(_recent_collected_show_ids_stmt(current_user.id, 5))
     recent_show_ids = [row[0] for row in recent_shows_q.all() if row[0] not in dropped_show_tmdb_ids]
 
     seed_movies = random.sample(recent_movie_ids, min(3, len(recent_movie_ids)))
