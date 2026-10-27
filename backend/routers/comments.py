@@ -10,7 +10,7 @@ from models.comments import Comment
 from models.users import User
 from models.profile import UserProfileData, PrivacyLevel
 from models.global_settings import GlobalSettings
-from dependencies import get_current_user, get_optional_user
+from dependencies import get_current_user_or_api_key_strict, get_optional_user_or_api_key
 
 router = APIRouter()
 
@@ -45,7 +45,7 @@ async def list_comments(
     season_number: Optional[int] = None,
     episode_number: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
 ):
     if (tmdb_id is None) == (tvdb_id is None):
         raise HTTPException(status_code=400, detail="Provide exactly one of tmdb_id or tvdb_id")
@@ -105,7 +105,7 @@ async def list_comments(
 async def create_comment(
     body: CommentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key_strict),
 ):
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="Comment content cannot be empty")
@@ -149,7 +149,7 @@ async def update_comment(
     comment_id: int,
     body: CommentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key_strict),
 ):
     result = await db.execute(select(Comment).where(Comment.id == comment_id))
     comment = result.scalar_one_or_none()
@@ -180,7 +180,7 @@ async def update_comment(
 async def delete_comment(
     comment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_api_key_strict),
 ):
     query = select(Comment).where(Comment.id == comment_id)
     result = await db.execute(query)
