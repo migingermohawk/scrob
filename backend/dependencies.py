@@ -158,6 +158,61 @@ async def get_current_user_or_api_key(
     )
 
 
+async def get_current_user_or_api_key_strict(
+    db: AsyncSession = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    api_key: Optional[str] = Query(None, description="Scrob API key, as an alternative to a JWT Bearer token"),
+    x_api_key: Optional[str] = Header(None, alias="X-Api-Key"),
+) -> User:
+    """Like get_current_user (a device-scoped token is rejected with a 403, as
+    on every other account endpoint) but also accepts a Scrob API key, via
+    ?api_key= or the X-Api-Key header, for clients that only hold a static
+    key (media-server plugins, third-party apps).
+
+    Deliberately not built on get_current_user_or_api_key: its JWT path goes
+    through get_optional_user, which resolves device-scoped tokens. That is
+    right for data endpoints and wrong for endpoints that read or change the
+    account itself."""
+    if token:
+        try:
+            payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+            if payload.get("type") == DEVICE_TOKEN_TYPE:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This access token has limited scope and cannot be used for account operations",
+                )
+            if payload.get("type") != "2fa_pending":
+                user_id_val = payload.get("sub")
+                if user_id_val is not None:
+                    query = select(User).where(User.id == int(user_id_val)).options(selectinload(User.profile))
+                    result = await db.execute(query)
+                    user = result.scalar_one_or_none()
+                    if user:
+                        return user
+        except (PyJWTError, ValueError, TypeError):
+            pass
+
+    key = api_key or x_api_key
+    if key:
+        # selectinload(User.profile) here too - the JWT branch above loads
+        # it, and callers like comments.py's create_comment read
+        # current_user.display_name/.profile synchronously (not awaited)
+        # after this dependency returns; an unloaded lazy relationship on an
+        # AsyncSession raises MissingGreenlet outside the active await, so
+        # an api_key-authenticated request would 500 without this.
+        query = select(User).where(User.api_key == key).options(selectinload(User.profile))
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+        if user:
+            return user
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def get_optional_user_or_api_key(
     db: AsyncSession = Depends(get_db),
     jwt_user: Optional[User] = Depends(get_optional_user),

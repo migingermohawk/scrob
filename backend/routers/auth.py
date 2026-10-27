@@ -38,7 +38,7 @@ from core.limiter import limiter
 from core.backup import restore_backup
 from core.nuvio import NuvioAPIError, parse_profile_id
 import schemas
-from dependencies import get_current_user, oauth2_scheme, DEVICE_TOKEN_TYPE
+from dependencies import get_current_user, get_current_user_or_api_key_strict, oauth2_scheme, DEVICE_TOKEN_TYPE
 from sqlalchemy.orm import selectinload
 from fastapi import File, UploadFile
 from core.timeutil import utcnow
@@ -425,7 +425,7 @@ async def renew_session(
 
 
 @router.get("/me", response_model=schemas.User)
-async def read_users_me(current_user: User = Depends(get_current_user)):
+async def read_users_me(current_user: User = Depends(get_current_user_or_api_key_strict)):
     return current_user
 
 @router.delete("/me")
