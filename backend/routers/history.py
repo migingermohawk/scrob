@@ -1866,7 +1866,8 @@ async def drop_show(
 
 @router.delete("/drop/show")
 async def undrop_show(
-    show_id: int = Query(...),
+    show_id: int | None = Query(None),
+    tmdb_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_api_key),
 ):
@@ -1874,6 +1875,13 @@ async def undrop_show(
     settings = settings_result.scalar_one_or_none()
     if not settings:
         raise HTTPException(status_code=404, detail="Settings not found")
+    if not (show_id and show_id > 0) and tmdb_id:
+        # Same as undropping a movie by tmdb_id: only an existing local row can
+        # have been dropped, so nothing is created here.
+        existing = (await db.execute(select(Show).where(Show.tmdb_id == tmdb_id))).scalars().first()
+        show_id = existing.id if existing else None
+    if not show_id:
+        return {"status": "ok"}
     dropped = list(settings.dropped_shows or [])
     if show_id in dropped:
         dropped.remove(show_id)
