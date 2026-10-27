@@ -19,6 +19,7 @@ from db import get_db
 from models.base import Base
 from models.collection import Collection
 from models.media import Media
+from models.ratings import Rating
 from models.show import Show
 from models.users import User, UserSettings
 from routers import media as media_router
@@ -93,6 +94,30 @@ class RecommendedEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(media_router, "get_user_tmdb_key", new=AsyncMock(return_value="tmdb-key")):
             resp = await self.client.get("/media/recommended", params={"api_key": "k-bob"})
         self.assertEqual(resp.json(), {"results": []})
+
+    async def test_a_low_rated_collected_title_is_not_used_as_a_seed(self):
+        async with self.Session() as s:
+            s.add(Rating(user_id=1, media_id=1, rating=3.0))
+            await s.commit()
+        recs = AsyncMock(return_value={"results": [_movie_result(200, "Fresh One")]})
+        with patch.object(media_router, "get_user_tmdb_key", new=AsyncMock(return_value="tmdb-key")), \
+             patch.object(media_router.tmdb, "get_movie_recommendations", new=recs):
+            resp = await self.client.get("/media/recommended", params={"api_key": "k-alice"})
+        self.assertEqual(resp.json(), {"results": []})
+        recs.assert_not_awaited()
+
+    async def test_a_loved_title_seeds_even_when_it_was_not_collected(self):
+        async with self.Session() as s:
+            s.add(Media(id=3, tmdb_id=300, media_type="movie", title="Loved But Not Collected"))
+            s.add(Rating(user_id=1, media_id=3, rating=9.5))
+            await s.commit()
+        recs = AsyncMock(return_value={"results": [_movie_result(200, "Fresh One")]})
+        with patch.object(media_router, "get_user_tmdb_key", new=AsyncMock(return_value="tmdb-key")), \
+             patch.object(media_router.tmdb, "get_movie_recommendations", new=recs):
+            resp = await self.client.get("/media/recommended", params={"api_key": "k-alice"})
+        self.assertEqual([r["title"] for r in resp.json()["results"]], ["Fresh One"])
+        seeds = {call.args[0] for call in recs.await_args_list}
+        self.assertIn(300, seeds)
 
 
 class RecentCollectedShowsQueryTests(unittest.IsolatedAsyncioTestCase):
