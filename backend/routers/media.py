@@ -5653,6 +5653,86 @@ async def get_media_details(
         raise HTTPException(status_code=404, detail=f"TMDB Media not found: {e}")
 
 
+@router.get("/{type}/{tmdb_id}/watchers")
+async def get_watchers(
+    type: MediaType,
+    tmdb_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
+):
+    """People the caller follows who have watched this title (a completed
+    movie watch, or any completed episode for a series), newest first, for a
+    "watched by" row on a title page. Respects profile privacy the way
+    _check_profile_access does for a viewer: public profiles show, a
+    friends_only profile only when it follows the caller back, private never.
+    Watch events only; no ratings join."""
+    from models.base import PrivacyLevel
+    from models.follows import Follow
+
+    if type not in (MediaType.movie, MediaType.series):
+        raise HTTPException(status_code=400, detail="type must be movie or series")
+
+    following_ids = select(Follow.following_id).where(Follow.follower_id == current_user.id)
+    query = (
+        select(
+            WatchEvent.user_id,
+            func.max(WatchEvent.watched_at),
+            func.max(WatchEvent.created_at),
+        )
+        .select_from(WatchEvent)
+        .join(Media, WatchEvent.media_id == Media.id)
+        .where(WatchEvent.user_id.in_(following_ids), WatchEvent.completed == True)
+        .group_by(WatchEvent.user_id)
+    )
+    if type == MediaType.movie:
+        query = query.where(Media.tmdb_id == tmdb_id, Media.media_type == MediaType.movie)
+    else:
+        query = (
+            query.join(ShowModel, Media.show_id == ShowModel.id)
+            .where(ShowModel.tmdb_id == tmdb_id, Media.media_type == MediaType.episode)
+        )
+    rows = (await db.execute(query)).all()
+    if not rows:
+        return {"watchers": []}
+
+    user_ids = [row[0] for row in rows]
+    users = {u.id: u for u in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()}
+    profiles = {
+        p.user_id: p
+        for p in (await db.execute(select(UserProfileData).where(UserProfileData.user_id.in_(user_ids)))).scalars().all()
+    }
+    follows_back = {
+        row[0]
+        for row in (
+            await db.execute(
+                select(Follow.follower_id).where(Follow.following_id == current_user.id, Follow.follower_id.in_(user_ids))
+            )
+        ).all()
+    }
+
+    watchers = []
+    for user_id, watched_at, created_at in rows:
+        user = users.get(user_id)
+        if not user:
+            continue
+        profile = profiles.get(user_id)
+        privacy = profile.privacy_level if profile else PrivacyLevel.private
+        if privacy == PrivacyLevel.private:
+            continue
+        if privacy == PrivacyLevel.friends_only and user_id not in follows_back:
+            continue
+        last = watched_at or created_at
+        watchers.append({
+            "id": user.id,
+            "username": user.username,
+            "display_name": profile.display_name if profile and profile.display_name else user.username,
+            "avatar_url": f"/profile/avatar/{user.id}" if profile and profile.avatar_path else None,
+            "last_watched_at": last.isoformat() if last else None,
+        })
+    watchers.sort(key=lambda w: w["last_watched_at"] or "", reverse=True)
+    return {"watchers": watchers}
+
+
 @router.get("/{type}/{tmdb_id}/recommendations")
 async def get_media_recommendations(
     type: MediaType,
