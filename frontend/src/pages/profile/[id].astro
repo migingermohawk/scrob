@@ -537,7 +537,15 @@ Lists
                         <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
                         Following
                       </span>
-                      <span class="text-zinc-400 font-bold">{profile.following_count}</span>
+                      <span class="flex items-center gap-2">
+                        <span class="text-zinc-400 font-bold">{profile.following_count}</span>
+                        {/* This preview is capped at 8 (get_public_profile's own
+                            limit) - the full paginated list lives on its own
+                            page. */}
+                        {profile.following_count > profile.following.length && (
+                          <a href={`/profile/${id}/following`} class="normal-case tracking-normal text-blue-400 hover:text-blue-300 font-bold">View all</a>
+                        )}
+                      </span>
                     </h3>
                     <div class="flex flex-wrap gap-2">
                       {profile.following.map((entry) => (
@@ -563,7 +571,12 @@ Lists
                         <span class="w-1 h-3.5 bg-yellow-500 rounded-full"></span>
                         Followers
                       </span>
-                      <span class="text-zinc-400 font-bold">{profile.follower_count}</span>
+                      <span class="flex items-center gap-2">
+                        <span class="text-zinc-400 font-bold">{profile.follower_count}</span>
+                        {profile.follower_count > profile.followers.length && (
+                          <a href={`/profile/${id}/followers`} class="normal-case tracking-normal text-blue-400 hover:text-blue-300 font-bold">View all</a>
+                        )}
+                      </span>
                     </h3>
                     <div class="flex flex-wrap gap-2">
                       {profile.followers.map((entry) => (

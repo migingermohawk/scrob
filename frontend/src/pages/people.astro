@@ -1,0 +1,80 @@
+---
+// Browse every visible (public/friends_only) profile on the instance,
+// optionally filtered by name, with whether you follow them and they follow
+// you, each linking to their profile. Unlike /search?type=user (which only
+// shows results once you have typed something), this defaults to browsing
+// everyone, paginated; the search box here narrows the same list.
+import Base from "../layouts/Base.astro";
+import UserDirectoryCard from "../components/UserDirectoryCard.astro";
+import Pagination from "../components/Pagination.astro";
+import { api } from "../lib/api";
+
+// Not in middleware.ts's PUBLIC_ROUTES, so an anonymous visitor is already
+// redirected to /login before this page ever runs (no anonymous "browse
+// all public users" use case - same as /search?type=user's own server-side
+// gate) - token/currentUser are guaranteed to be real here.
+const { token, user: currentUser } = Astro.locals;
+
+const q = Astro.url.searchParams.get("q") || "";
+const page = parseInt(Astro.url.searchParams.get("page") || "1");
+
+let results: Awaited<ReturnType<typeof api.profile.searchUsers>>["results"] = [];
+let totalPages = 1;
+let totalResults = 0;
+let error = "";
+
+try {
+  const data = await api.profile.searchUsers(q, token, page);
+  results = data.results;
+  totalPages = data.total_pages;
+  totalResults = data.total_results;
+} catch (e: unknown) {
+  error = e instanceof Error ? e.message : String(e);
+}
+
+const baseUrl = `/people${q ? `?q=${encodeURIComponent(q)}` : ""}`;
+---
+
+<Base title="People">
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+
+  <div class="mb-8">
+    <h1 class="page-title mb-2">People</h1>
+    <p class="text-zinc-500">{totalResults} {totalResults === 1 ? "profile" : "profiles"}{q ? ` matching "${q}"` : ""}</p>
+  </div>
+
+  <form action="/people" method="GET" class="relative mb-8 max-w-md">
+    <input
+      type="text"
+      name="q"
+      value={q}
+      placeholder="Search people by name or username..."
+      class="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-700 focus:border-zinc-700 transition-all placeholder:text-zinc-500"
+    />
+    <svg xmlns="http://www.w3.org/2000/svg" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+  </form>
+
+  {error && (
+    <div class="text-center py-20">
+      <p class="text-red-400">{error}</p>
+    </div>
+  )}
+
+  {!error && results.length === 0 && (
+    <div class="text-center py-20">
+      <p class="text-zinc-500">{q ? `No profiles found for "${q}".` : "No visible profiles yet."}</p>
+    </div>
+  )}
+
+  {!error && results.length > 0 && (
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {results.map((user) => (
+        <UserDirectoryCard user={user} viewerLoggedIn={!!currentUser} />
+      ))}
+    </div>
+  )}
+
+  {totalPages > 1 && (
+    <Pagination currentPage={page} totalPages={totalPages} baseUrl={baseUrl} />
+  )}
+</Base>
