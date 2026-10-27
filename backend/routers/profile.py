@@ -1204,6 +1204,12 @@ async def get_recently_watched_shows(
     }
 
 
+def _format_rating_distribution(rows) -> list[dict]:
+    """(rating, count) rows -> the `{"rating", "count"}` list the stats
+    response sends for each rating distribution."""
+    return [{"rating": float(r), "count": c} for r, c in rows]
+
+
 @router.get("/{user_id}/stats")
 async def get_user_stats(
     user_id: int,
@@ -1422,9 +1428,27 @@ async def get_user_stats(
         .group_by(Rating.rating)
         .order_by(Rating.rating)
     )
-    rating_distribution = [
-        {"rating": float(r), "count": c} for r, c in rating_dist_q.all()
-    ]
+    rating_distribution = _format_rating_distribution(rating_dist_q.all())
+
+    # The same distribution split by media type, so a client can chart movies
+    # against shows; `rating_distribution` above stays the combined one.
+    async def _rating_distribution_for(media_type: str) -> list[dict]:
+        by_type_q = await db.execute(
+            select(Rating.rating, func.count(Rating.id).label("cnt"))
+            .join(Media, Rating.media_id == Media.id)
+            .where(
+                Rating.user_id == user_id,
+                Rating.rating.isnot(None),
+                Media.media_type == media_type,
+                *rating_date_filters,
+            )
+            .group_by(Rating.rating)
+            .order_by(Rating.rating)
+        )
+        return _format_rating_distribution(by_type_q.all())
+
+    rating_distribution_movies = await _rating_distribution_for("movie")
+    rating_distribution_shows = await _rating_distribution_for("series")
 
     avg_movie_rating_q = await db.execute(
         select(func.avg(Rating.rating))
@@ -1568,6 +1592,8 @@ async def get_user_stats(
         "watch_activity": watch_activity,
         "watch_time_activity": watch_time_activity,
         "rating_distribution": rating_distribution,
+        "rating_distribution_movies": rating_distribution_movies,
+        "rating_distribution_shows": rating_distribution_shows,
         "avg_movie_rating": avg_movie_rating,
         "avg_show_rating": avg_show_rating,
         "top_movie_genres": top_movie_genres,
