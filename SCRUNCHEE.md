@@ -31,6 +31,17 @@ docker compose -f docker-compose.scrunchee.yml up -d
 
 Scrob migrates its database on start, and a newer upstream may add migrations that cannot be undone, so take a `pg_dump` before switching an existing install to this image, and try it first on a copy.
 
+## Testing
+
+```
+cd backend
+python -m pytest tests                 # the whole suite, on in-memory SQLite (about 40 seconds)
+pip install pgserver
+./run_postgres_tests.sh                # the fork's own tests, on a real PostgreSQL
+```
+
+The suite uses SQLite because upstream's tests do. SQLite is not PostgreSQL, so `run_postgres_tests.sh` runs the fork's tests again on a real PostgreSQL 16 (bundled by `pgserver`, no Docker needed) whose schema is built from the Alembic migrations. Some of upstream's own SQLite-based tests rely on SQLite not checking foreign keys and do not pass there, so only the fork's tests are run this way.
+
 ## Branches
 
 - `main` is a copy of upstream `main`, only ever fast-forwarded.
