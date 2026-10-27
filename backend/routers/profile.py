@@ -612,6 +612,65 @@ async def search_users(
     return {"results": results}
 
 
+_FOLLOW_LIST_PAGE_SIZE = 24
+
+
+async def _follow_list(
+    db: AsyncSession, user_id: int, page: int, current_user: Optional[User], *, followers: bool
+) -> dict:
+    """One page of a profile's followers (or following), newest first, as
+    directory cards."""
+    await _check_profile_access(user_id, current_user, db)
+
+    if followers:
+        join_on, filter_on = Follow.follower_id == User.id, Follow.following_id == user_id
+    else:
+        join_on, filter_on = Follow.following_id == User.id, Follow.follower_id == user_id
+    base_q = (
+        select(User, UserProfileData)
+        .join(Follow, join_on)
+        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
+        .where(filter_on)
+    )
+    total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
+    rows = (
+        await db.execute(
+            base_q.order_by(Follow.created_at.desc(), User.id)
+            .offset((page - 1) * _FOLLOW_LIST_PAGE_SIZE)
+            .limit(_FOLLOW_LIST_PAGE_SIZE)
+        )
+    ).all()
+    return {
+        "results": await _directory_cards(db, rows, current_user) if rows else [],
+        "page": page,
+        "total_pages": max(1, -(-total // _FOLLOW_LIST_PAGE_SIZE)),
+        "total_results": total,
+    }
+
+
+@router.get("/{user_id}/following-list")
+async def get_following_list(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
+):
+    """Everyone this profile follows, paginated. The profile response only
+    carries a short preview. Same privacy rules as the rest of the profile."""
+    return await _follow_list(db, user_id, page, current_user, followers=False)
+
+
+@router.get("/{user_id}/followers-list")
+async def get_followers_list(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
+):
+    """Everyone who follows this profile, paginated; see following-list."""
+    return await _follow_list(db, user_id, page, current_user, followers=True)
+
+
 @router.post("/{user_id}/follow")
 async def follow_user(
     user_id: int,
