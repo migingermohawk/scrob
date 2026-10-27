@@ -21,7 +21,12 @@ from core.translations import (
     upsert_show_translation,
 )
 
-from dependencies import get_current_user, get_current_user_or_api_key, get_optional_user_or_api_key
+from dependencies import (
+    get_current_user,
+    get_current_user_or_api_key,
+    get_current_user_or_api_key_strict,
+    get_optional_user_or_api_key,
+)
 from models.users import User
 from models.profile import UserProfileData, PrivacyLevel
 from models.events import WatchEvent
@@ -175,7 +180,10 @@ async def get_profile(
 @router.patch("/me", response_model=schemas.UserProfileResponse)
 async def update_profile(
     body: schemas.UserProfileUpdate,
-    current_user: User = Depends(get_current_user),
+    # Accepts an API key as well as a JWT, like GET /profile/me. The strict
+    # variant, because this changes account data and must keep rejecting
+    # device-scoped tokens.
+    current_user: User = Depends(get_current_user_or_api_key_strict),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
