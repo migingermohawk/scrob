@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import MediaCard from "../components/MediaCard.astro";
 import Pagination from "../components/Pagination.astro";
+import UserDirectoryCard from "../components/UserDirectoryCard.astro";
 import { api, type MediaItem, type UserSearchResult } from "../lib/api";
 
 const { token, user: currentUser } = Astro.locals;
@@ -50,9 +51,10 @@ if (q.length >= 2) {
       if (!currentUser) {
         error = "Log in to search for users.";
       } else {
-        const data = await api.profile.searchUsers(q, token);
+        const data = await api.profile.searchUsers(q, token, page);
         userResults = data.results;
-        totalResults = userResults.length;
+        totalPages = data.total_pages;
+        totalResults = data.total_results;
       }
     } else {
       const data = await api.media.search(q, type, page, showYearFilter ? year : undefined, token, inLibrary);
@@ -178,57 +180,7 @@ const searchPrompt = `Type something in the search bar to find ${
   {isUserSearch && userResults.length > 0 && (
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {userResults.map((user) => (
-        <div class="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 flex flex-col gap-4 hover:border-zinc-600 transition-all">
-          <!-- Top row: avatar + name + follow -->
-          <div class="flex items-center gap-4">
-            <a href={`/profile/${user.id}`} class="shrink-0">
-              <div class="w-14 h-14 rounded-xl overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                {user.avatar_url ? (
-                  <img src={`/api/proxy${user.avatar_url}`} alt={user.display_name} class="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <span class="text-xl font-black text-zinc-400">{user.display_name[0].toUpperCase()}</span>
-                )}
-              </div>
-            </a>
-
-            <div class="flex-1 min-w-0">
-              <a href={`/profile/${user.id}`} class="block">
-                <p class="font-bold text-zinc-100 truncate leading-tight">{user.display_name}</p>
-                <p class="text-xs text-zinc-500 truncate">@{user.username}{user.country ? ` · ${user.country.toUpperCase()}` : ""}</p>
-              </a>
-            </div>
-
-            {!user.is_self && currentUser && (
-              <button
-                class={`follow-btn cursor-pointer shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${user.is_following ? "bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-300 border-zinc-700 hover:border-red-500/40" : "bg-blue-600/80 hover:bg-blue-500 text-white border-blue-500/40"}`}
-                data-user-id={user.id}
-                data-following={user.is_following ? "true" : "false"}
-              >
-                {user.is_following ? "Following" : "Follow"}
-              </button>
-            )}
-          </div>
-
-          <!-- Stats row -->
-          <div class="grid grid-cols-4 gap-2 pt-1 border-t border-zinc-800">
-            <div class="text-center">
-              <p class="text-base font-black text-zinc-100 leading-none">{user.movies_watched}</p>
-              <p class="text-[10px] text-zinc-400 font-bold uppercase tracking-wide mt-1">Movies</p>
-            </div>
-            <div class="text-center">
-              <p class="text-base font-black text-zinc-100 leading-none">{user.shows_watched}</p>
-              <p class="text-[10px] text-zinc-400 font-bold uppercase tracking-wide mt-1">Shows</p>
-            </div>
-            <div class="text-center">
-              <p class="text-base font-black text-zinc-100 leading-none">{user.total_rated}</p>
-              <p class="text-[10px] text-zinc-400 font-bold uppercase tracking-wide mt-1">Rated</p>
-            </div>
-            <div class="text-center">
-              <p class="text-base font-black text-zinc-100 leading-none">{user.follower_count}</p>
-              <p class="text-[10px] text-zinc-400 font-bold uppercase tracking-wide mt-1">Followers</p>
-            </div>
-          </div>
-        </div>
+        <UserDirectoryCard user={user} viewerLoggedIn={!!currentUser} />
       ))}
     </div>
   )}
@@ -275,7 +227,7 @@ const searchPrompt = `Type something in the search bar to find ${
     </div>
   )}
 
-  {!isUserSearch && totalPages > 1 && (
+  {totalPages > 1 && (
     <Pagination currentPage={page} totalPages={totalPages} baseUrl={baseUrl} />
   )}
 
@@ -305,7 +257,6 @@ const searchPrompt = `Type something in the search bar to find ${
 
   function setup() {
     const token = (document.getElementById('app-data') as HTMLElement | null)?.dataset.token ?? '';
-
     const tvdbBtn = document.getElementById('tvdb-fallback-btn') as HTMLButtonElement | null;
     const tvdbResults = document.getElementById('tvdb-fallback-results') as HTMLElement | null;
     if (tvdbBtn && tvdbResults) {
@@ -373,37 +324,9 @@ const searchPrompt = `Type something in the search bar to find ${
       });
     }
 
-    document.querySelectorAll<HTMLButtonElement>('.follow-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const userId = Number(btn.dataset.userId);
-        const isFollowing = btn.dataset.following === 'true';
-        btn.disabled = true;
-
-        try {
-          const res = await fetch(`/api/proxy/profile/${userId}/follow`, {
-            method: isFollowing ? 'DELETE' : 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          if (!res.ok) throw new Error();
-
-          const nowFollowing = !isFollowing;
-          btn.dataset.following = nowFollowing ? 'true' : 'false';
-          btn.textContent = nowFollowing ? 'Following' : 'Follow';
-          btn.className = btn.className.replace(
-            nowFollowing
-              ? 'bg-blue-600/80 hover:bg-blue-500 text-white border-blue-500/40'
-              : 'bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-300 border-zinc-700 hover:border-red-500/40',
-            nowFollowing
-              ? 'bg-zinc-800 hover:bg-red-900/40 text-zinc-300 hover:text-red-300 border-zinc-700 hover:border-red-500/40'
-              : 'bg-blue-600/80 hover:bg-blue-500 text-white border-blue-500/40'
-          );
-        } catch {
-          // silently ignore
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
+    // The follow buttons are wired up inside UserDirectoryCard.astro itself
+    // (document-level click delegation); binding them here too would send the
+    // follow or unfollow request twice per click.
   }
 
   // Live search: this page has no search input of its own - typing in the

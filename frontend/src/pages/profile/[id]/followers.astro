@@ -1,0 +1,73 @@
+---
+// Full, paginated followers list - same reasoning/shape as
+// following.astro, just the reverse relationship.
+export const prerender = false;
+
+import Base from "../../../layouts/Base.astro";
+import UserDirectoryCard from "../../../components/UserDirectoryCard.astro";
+import Pagination from "../../../components/Pagination.astro";
+import { api } from "../../../lib/api";
+
+const { id } = Astro.params;
+const { token, user: currentUser } = Astro.locals;
+const page = parseInt(Astro.url.searchParams.get("page") || "1");
+
+let displayName = "";
+let results: Awaited<ReturnType<typeof api.profile.followers>>["results"] = [];
+let totalPages = 1;
+let totalResults = 0;
+let error = "";
+
+try {
+  const [profile, data] = await Promise.all([
+    api.profile.getPublic(Number(id), token),
+    api.profile.followers(Number(id), token, page),
+  ]);
+  displayName = profile.display_name;
+  results = data.results;
+  totalPages = data.total_pages;
+  totalResults = data.total_results;
+} catch (e: any) {
+  if (e.message?.includes("403")) {
+    error = "This profile is private.";
+  } else if (e.message?.includes("404")) {
+    error = "User not found.";
+  } else {
+    error = "Failed to load this list.";
+  }
+}
+---
+
+<Base title={displayName ? `${displayName} · Followers` : "Followers"}>
+  <div id="app-data" data-token={token} class="hidden" aria-hidden="true"></div>
+
+  <div class="mb-8">
+    <a href={`/profile/${id}`} class="text-sm text-zinc-500 hover:text-zinc-300 transition-colors mb-2 inline-block">&larr; Back to profile</a>
+    <h1 class="page-title mb-2">{displayName ? `${displayName}'s Followers` : "Followers"}</h1>
+    {!error && <p class="text-zinc-500">{totalResults} {totalResults === 1 ? "follower" : "followers"}</p>}
+  </div>
+
+  {error && (
+    <div class="text-center py-20">
+      <p class="text-zinc-500">{error}</p>
+    </div>
+  )}
+
+  {!error && results.length === 0 && (
+    <div class="text-center py-20">
+      <p class="text-zinc-500">No followers yet.</p>
+    </div>
+  )}
+
+  {!error && results.length > 0 && (
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {results.map((user) => (
+        <UserDirectoryCard user={user} viewerLoggedIn={!!currentUser} />
+      ))}
+    </div>
+  )}
+
+  {totalPages > 1 && (
+    <Pagination currentPage={page} totalPages={totalPages} baseUrl={`/profile/${id}/followers`} />
+  )}
+</Base>

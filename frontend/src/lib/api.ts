@@ -1114,7 +1114,17 @@ export interface UserSearchResult {
   total_rated: number;
   follower_count: number;
   is_following: boolean;
+  // Does this user follow the viewer back? Absent (undefined) on older cached
+  // responses; every consumer treats that as false.
+  is_follower: boolean;
   is_self: boolean;
+}
+
+export interface UserDirectoryPage {
+  results: UserSearchResult[];
+  page: number;
+  total_pages: number;
+  total_results: number;
 }
 
 export interface ProfileFollowEntry {
@@ -1652,8 +1662,14 @@ export const api = {
       post<{ status: string }>(`/profile/${userId}/follow`, undefined, token),
     unfollow: (userId: number, token: string) =>
       del<{ status: string }>(`/profile/${userId}/follow`, token),
-    searchUsers: (q: string, token?: string) =>
-      get<{ results: UserSearchResult[] }>("/profile/search", { q }, token),
+    // With `q` empty this pages through every visible profile instead of
+    // requiring a search term first.
+    searchUsers: (q: string, token?: string, page: number = 1) =>
+      get<UserDirectoryPage>("/profile/search", { q, page }, token),
+    following: (userId: number, token?: string, page: number = 1) =>
+      get<UserDirectoryPage>(`/profile/${userId}/following-list`, { page }, token),
+    followers: (userId: number, token?: string, page: number = 1) =>
+      get<UserDirectoryPage>(`/profile/${userId}/followers-list`, { page }, token),
     getStats: (userId: number, token?: string) =>
       get<UserStats>(`/profile/${userId}/stats`, undefined, token),
     topRatedMovies: (userId: number, page: number = 1, token?: string) =>
