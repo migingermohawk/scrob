@@ -508,37 +508,11 @@ async def get_avatar(
     return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
 
 
-@router.get("/search")
-async def search_users(
-    q: str = "",
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_or_api_key),
-):
-    """Unlike viewing a single profile/list by ID, this is a directory-style
-    enumeration of every public/friends_only user matching a pattern, so it
-    stays behind real authentication regardless of the enable_logged_out_navigation
-    toggle, there's no anonymous "browse all public users" use case to support."""
-    if len(q.strip()) < 1:
-        return {"results": []}
-
-    pattern = f"%{q.strip()}%"
-
-    # Match on username or display_name, only public profiles (+ own profile)
-    users_q = await db.execute(
-        select(User, UserProfileData)
-        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
-        .where(
-            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)),
-            (UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only]))
-            | (User.id == current_user.id),
-        )
-        .order_by(User.username)
-        .limit(24)
-    )
-    rows = users_q.all()
-    if not rows:
-        return {"results": []}
-
+async def _directory_cards(db: AsyncSession, rows, current_user: Optional[User]) -> list[dict]:
+    """Directory cards (identity plus watched, collected, rated and follower
+    counts, and whether the viewer follows each person) for (User, profile)
+    rows. Shared by user search and the following/followers lists so they
+    return the same shape."""
     user_ids = [u.id for u, _ in rows]
 
     # Batch stats
@@ -607,7 +581,102 @@ async def search_users(
             "is_self": current_user is not None and current_user.id == u.id,
         })
 
+    return results
+
+
+@router.get("/search")
+async def search_users(
+    q: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
+):
+    """Unlike viewing a single profile/list by ID, this is a directory-style
+    enumeration of every public/friends_only user matching a pattern, so it
+    stays behind real authentication regardless of the enable_logged_out_navigation
+    toggle, there's no anonymous "browse all public users" use case to support."""
+    if len(q.strip()) < 1:
+        return {"results": []}
+
+    pattern = f"%{q.strip()}%"
+
+    # Match on username or display_name, only public profiles (+ own profile)
+    users_q = await db.execute(
+        select(User, UserProfileData)
+        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
+        .where(
+            (User.username.ilike(pattern)) | (UserProfileData.display_name.ilike(pattern)),
+            (UserProfileData.privacy_level.in_([PrivacyLevel.public, PrivacyLevel.friends_only]))
+            | (User.id == current_user.id),
+        )
+        .order_by(User.username)
+        .limit(24)
+    )
+    rows = users_q.all()
+    if not rows:
+        return {"results": []}
+
+    results = await _directory_cards(db, rows, current_user)
+
     return {"results": results}
+
+
+_FOLLOW_LIST_PAGE_SIZE = 24
+
+
+async def _follow_list(
+    db: AsyncSession, user_id: int, page: int, current_user: Optional[User], *, followers: bool
+) -> dict:
+    """One page of a profile's followers (or following), newest first, as
+    directory cards."""
+    await _check_profile_access(user_id, current_user, db)
+
+    if followers:
+        join_on, filter_on = Follow.follower_id == User.id, Follow.following_id == user_id
+    else:
+        join_on, filter_on = Follow.following_id == User.id, Follow.follower_id == user_id
+    base_q = (
+        select(User, UserProfileData)
+        .join(Follow, join_on)
+        .outerjoin(UserProfileData, UserProfileData.user_id == User.id)
+        .where(filter_on)
+    )
+    total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
+    rows = (
+        await db.execute(
+            base_q.order_by(Follow.created_at.desc(), User.id)
+            .offset((page - 1) * _FOLLOW_LIST_PAGE_SIZE)
+            .limit(_FOLLOW_LIST_PAGE_SIZE)
+        )
+    ).all()
+    return {
+        "results": await _directory_cards(db, rows, current_user) if rows else [],
+        "page": page,
+        "total_pages": max(1, -(-total // _FOLLOW_LIST_PAGE_SIZE)),
+        "total_results": total,
+    }
+
+
+@router.get("/{user_id}/following-list")
+async def get_following_list(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
+):
+    """Everyone this profile follows, paginated. The profile response only
+    carries a short preview. Same privacy rules as the rest of the profile."""
+    return await _follow_list(db, user_id, page, current_user, followers=False)
+
+
+@router.get("/{user_id}/followers-list")
+async def get_followers_list(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user_or_api_key),
+):
+    """Everyone who follows this profile, paginated; see following-list."""
+    return await _follow_list(db, user_id, page, current_user, followers=True)
 
 
 @router.post("/{user_id}/follow")
