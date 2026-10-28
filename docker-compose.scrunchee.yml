@@ -31,6 +31,12 @@ services:
   scrob:
     # The image built from this fork, for example ghcr.io/<owner>/scrob:scrunchee
     image: ${SCROB_IMAGE:?set SCROB_IMAGE to the fork's image}
+    # To build it from this checkout instead (a test copy), run with --build; Portainer's
+    # "Repository" stack type does this from the repository. APP_VERSION shows on the About page.
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     restart: unless-stopped
     depends_on:
       scrob-db:
