@@ -42,6 +42,10 @@ pip install pgserver
 
 The suite uses SQLite because upstream's tests do. SQLite is not PostgreSQL, so `run_postgres_tests.sh` runs the fork's tests again on a real PostgreSQL 16 (bundled by `pgserver`, no Docker needed) whose schema is built from the Alembic migrations. Some of upstream's own SQLite-based tests rely on SQLite not checking foreign keys and do not pass there, so only the fork's tests are run this way.
 
+### Checks on every push
+
+`.forgejo/workflows/ci.yml` (Forgejo Actions) runs, for the `scrunchee` branch and pull requests into it: the whole suite on SQLite, the fork's tests on PostgreSQL, a check for names that are used but never defined (`backend/check_undefined_names.py`, which only fails on names upstream does not already have, listed in `backend/undefined_names_baseline.txt`; rewrite that list with `--update` after a sync with upstream), and the frontend build.
+
 ## The image
 
 `.github/workflows/scrunchee-image.yml` builds the image on GitHub and publishes it to the GitHub container registry as `ghcr.io/<owner>/scrob:scrunchee` (the latest build of the `scrunchee` branch), `:sha-<commit>` (that exact commit) and, for a tag named `scrunchee-v*`, a tag of that name. It runs the backend tests and the undefined-names check first, builds `linux/amd64` from the standard `Dockerfile`, and signs in with the built-in `GITHUB_TOKEN`, so no password is stored. The version shown on Scrob's About page is the upstream release it is based on plus the commit, for example `v2.34.2-scrunchee.1a2b3c4`.
