@@ -46,6 +46,16 @@ The suite uses SQLite because upstream's tests do. SQLite is not PostgreSQL, so 
 
 `.forgejo/workflows/ci.yml` (Forgejo Actions) runs, for the `scrunchee` branch and pull requests into it: the whole suite on SQLite, the fork's tests on PostgreSQL, a check for names that are used but never defined (`backend/check_undefined_names.py`, which only fails on names upstream does not already have, listed in `backend/undefined_names_baseline.txt`; rewrite that list with `--update` after a sync with upstream), and the frontend build.
 
+## The image
+
+`.github/workflows/scrunchee-image.yml` builds the image on GitHub and publishes it to the GitHub container registry as `ghcr.io/<owner>/scrob:scrunchee` (the latest build of the `scrunchee` branch), `:sha-<commit>` (that exact commit) and, for a tag named `scrunchee-v*`, a tag of that name. It runs the backend tests and the undefined-names check first, builds `linux/amd64` from the standard `Dockerfile`, and signs in with the built-in `GITHUB_TOKEN`, so no password is stored. The version shown on Scrob's About page is the upstream release it is based on plus the commit, for example `v2.34.2-scrunchee.1a2b3c4`.
+
+One-time setup on the GitHub fork:
+
+1. Push `main`, `scrunchee` and the upstream tags (`git push origin --tags`; the version comes from the latest `v*` tag).
+2. In the fork's Actions page, disable upstream's own workflows by file name (`docker-x64.yml`, `docker.yml`, `release.yml`), or they run on the fork as well.
+3. After the first run, open the package (Packages in the repository sidebar) and either make it public or give the machine that pulls it a read-only access token.
+
 ## Branches
 
 - `main` is a copy of upstream `main`, only ever fast-forwarded.

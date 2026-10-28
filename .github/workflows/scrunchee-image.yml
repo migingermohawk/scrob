@@ -1,0 +1,94 @@
+name: Scrunchee image
+
+# Builds the fork's Docker image and publishes it to GitHub's container registry:
+#   ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+#   ghcr.io/<owner>/scrob:sha-<commit>     that exact commit
+#   ghcr.io/<owner>/scrob:<tag>            when a tag named scrunchee-v* is pushed
+# linux/amd64 only, the standard (not omnibus) image: Scrob and PostgreSQL run as two
+# containers. Uses the built-in GITHUB_TOKEN, so no password is stored anywhere.
+#
+# Upstream's own three workflows (docker-x64.yml, docker.yml, release.yml) must be
+# disabled by file name in the fork's Actions page, or they run on this fork too.
+on:
+  push:
+    branches: [scrunchee]
+    tags: ["scrunchee-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    # Never publish from upstream itself.
+    if: github.repository != 'ellite/scrob'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SECRET_KEY: ci-test-secret-key-that-is-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: backend
+        run: |
+          python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/deps.txt
+          pip install -r /tmp/deps.txt pytest pytest-asyncio aiosqlite pyflakes
+      - name: Undefined names
+        working-directory: backend
+        run: python check_undefined_names.py
+      - name: Backend tests
+        working-directory: backend
+        run: python -m pytest tests -q
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, to find the upstream version this build is based on
+
+      - name: Image name and version
+        id: meta
+        run: |
+          # Image names must be lowercase; the account name may not be.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          # The upstream release this build is based on, then the fork and commit:
+          # shown on Scrob's About page, e.g. v2.34.2-scrunchee.1a2b3c4
+          base="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo dev)"
+          echo "version=${base}-scrunchee.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.meta.outputs.image }}
+          tags: |
+            type=raw,value=scrunchee,enable=${{ github.ref == 'refs/heads/scrunchee' }}
+            type=sha,prefix=sha-,format=short
+            type=ref,event=tag
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.tags.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
