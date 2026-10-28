@@ -1,0 +1,58 @@
+name: Scrunchee CI
+
+# Runs on the Forgejo runner for every push to the scrunchee branch, every pull request
+# into it, and by hand. Checks the backend (the whole suite on SQLite, then the fork's own
+# tests on a real PostgreSQL), looks for undefined names, and builds the frontend.
+#
+# Because this folder exists, Forgejo uses it instead of .github/workflows on this branch.
+# Branches cut from main have no .forgejo folder, so upstream's three workflows would run
+# on them: disable those by file name in the repository's Actions page.
+on:
+  push:
+    branches: [scrunchee]
+  pull_request:
+    branches: [scrunchee]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SECRET_KEY: ci-test-secret-key-that-is-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: backend
+        run: |
+          python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/deps.txt
+          pip install -r /tmp/deps.txt pytest pytest-asyncio aiosqlite pyflakes pgserver
+      - name: Undefined names
+        # A name used but never defined or imported (for example a helper upstream renamed)
+        # only fails when that line runs, so look for it directly. Names upstream already
+        # has are listed in backend/undefined_names_baseline.txt.
+        working-directory: backend
+        run: python check_undefined_names.py
+      - name: Whole suite (SQLite)
+        working-directory: backend
+        run: python -m pytest tests -q
+      - name: The fork's tests on PostgreSQL
+        working-directory: backend
+        run: ./run_postgres_tests.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx astro build
