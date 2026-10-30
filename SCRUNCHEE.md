@@ -46,6 +46,15 @@ pip install pgserver
 
 The suite uses SQLite because upstream's tests do. SQLite is not PostgreSQL, so `run_postgres_tests.sh` runs the fork's tests again on a real PostgreSQL 16 (bundled by `pgserver`, no Docker needed) whose schema is built from the Alembic migrations. Some of upstream's own SQLite-based tests rely on SQLite not checking foreign keys and do not pass there, so only the fork's tests are run this way.
 
+### Smoke test against a running copy
+
+```
+python3 scripts/smoke_test.py http://host:7331 <api key>          # reads only
+python3 scripts/smoke_test.py http://host:7331 <api key> --write  # also posts and deletes one comment
+```
+
+Calls each of the fork's endpoints with an API key and checks the shape of the answer, then loads the login and People pages, and prints one line per check. Use the address you open in a browser; `--api-prefix ''` talks straight to the backend instead.
+
 ### Checks on every push
 
 `.forgejo/workflows/ci.yml` (Forgejo Actions) runs, for the `scrunchee` branch and pull requests into it: the whole suite on SQLite, the fork's tests on PostgreSQL, a check for names that are used but never defined (`backend/check_undefined_names.py`, which only fails on names upstream does not already have, listed in `backend/undefined_names_baseline.txt`; rewrite that list with `--update` after a sync with upstream), and the frontend build.
