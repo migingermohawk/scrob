@@ -1,17 +1,23 @@
 # Run the Scrunchee fork of Scrob from its published image (see SCRUNCHEE.md).
 #
-# Same as docker-compose.yaml, except the image comes from SCROB_IMAGE and the
-# secrets are read from the environment (a .env file next to this one, or a
-# Portainer stack's environment variables) instead of being written in here:
+# Same as docker-compose.yaml, except the image comes from SCROB_IMAGE, the data lives in
+# folders you choose on the host, and the secrets are read from the environment (a .env
+# file next to this one, or a Portainer stack's environment variables) instead of being
+# written in here:
 #
-#   SCROB_IMAGE=ghcr.io/<owner>/scrob:scrunchee
+#   SCROB_IMAGE=ghcr.io/<owner>/scrob:scrunchee   # or a name to build, with --build
+#   SCROB_DB_DATA_PATH=<a host folder for the database>
+#   SCROB_APP_DATA_PATH=<a host folder for Scrob's data>
 #   POSTGRES_PASSWORD=<a password>
 #   SECRET_KEY=<openssl rand -hex 32>
-#   SCROB_PORT=7330        # optional; the port to publish on this host
+#   SCROB_PORT=7330        # optional; the port to publish on this host (default 7330)
+#   TZ=UTC                 # optional
+#   APP_VERSION=dev        # optional; shown on the About page when the image is built
+#   DATABASE_URL=...       # optional; only to use a different database
 #
-# To run a second copy next to an existing one (for testing a change against a
-# copy of your data), use a different SCROB_PORT and `docker compose -p <name>`
-# so it gets its own containers and volumes.
+# To run a second copy next to an existing one (for testing a change against a copy of
+# your data), give it its own folders and a different SCROB_PORT, and `docker compose -p
+# <name>` so it gets its own containers.
 services:
   scrob-db:
     image: postgres:16-alpine
@@ -21,7 +27,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: scrob
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - ${SCROB_DB_DATA_PATH:?set SCROB_DB_DATA_PATH to a folder on the host for the database}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scrob -d scrob"]
       interval: 5s
@@ -45,7 +51,8 @@ services:
       - "${SCROB_PORT:-7330}:7330"
     environment:
       # ── Database ────────────────────────────────────────────────────────────
-      DATABASE_URL: postgresql+asyncpg://scrob:${POSTGRES_PASSWORD}@scrob-db:5432/scrob
+      # Built from POSTGRES_PASSWORD; set DATABASE_URL to use a different database instead.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://scrob:${POSTGRES_PASSWORD}@scrob-db:5432/scrob}
 
       # ── Security ────────────────────────────────────────────────────────────
       # Generate with: openssl rand -hex 32
@@ -98,8 +105,5 @@ services:
       # Override the internal backend port (only needed if 7331 conflicts on bare metal installations)
       # BACKEND_PORT: "7331"
     volumes:
-      - scrob_data:/app/backend/data
+      - ${SCROB_APP_DATA_PATH:?set SCROB_APP_DATA_PATH to a folder on the host for Scrob's data}:/app/backend/data
 
-volumes:
-  db_data:
-  scrob_data:
