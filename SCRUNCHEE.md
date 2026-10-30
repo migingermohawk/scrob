@@ -55,6 +55,16 @@ python3 scripts/smoke_test.py http://host:7331 <api key> --write  # also posts a
 
 Calls each of the fork's endpoints with an API key and checks the shape of the answer, then loads the login and People pages, and prints one line per check. Use the address you open in a browser; `--api-prefix ''` talks straight to the backend instead.
 
+### Trying it on a copy of your data
+
+Restore a dump into a *separate* copy, then run `scripts/neutralise_copy.sql` on that copy **before starting its scrob container**:
+
+```
+docker exec -i <test-db-container> psql -U scrob -d scrob -v ON_ERROR_STOP=1 < scripts/neutralise_copy.sql
+```
+
+Scrob starts background jobs that sync with Jellyfin, Plex, Emby, Trakt, Simkl and others on their own and refresh tokens. Against a restored copy those jobs would use your real credentials and could push to your real accounts. The script gives every media-server connection an address nothing listens on, clears the tokens, and turns off automatic sync and push. TMDB and the other metadata keys are kept, so recommendations and artwork still work. Never run it on production.
+
 ### Checks on every push
 
 `.forgejo/workflows/ci.yml` (Forgejo Actions) runs, for the `scrunchee` branch and pull requests into it: the whole suite on SQLite, the fork's tests on PostgreSQL, a check for names that are used but never defined (`backend/check_undefined_names.py`, which only fails on names upstream does not already have, listed in `backend/undefined_names_baseline.txt`; rewrite that list with `--update` after a sync with upstream), and the frontend build.
