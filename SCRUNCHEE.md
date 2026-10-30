@@ -20,14 +20,18 @@ Each change is its own small branch cut from upstream `main`, so it can be offer
 
 ## Running it
 
-Use `docker-compose.scrunchee.yml`. It is the standard compose file with the image and the secrets taken from the environment:
+Use `docker-compose.scrunchee.yml`. It is the standard compose file with the image, the data folders and the secrets taken from the environment:
 
 ```
 SCROB_IMAGE=ghcr.io/<owner>/scrob:scrunchee
+SCROB_DB_DATA_PATH=/path/on/the/host/scrob/db
+SCROB_APP_DATA_PATH=/path/on/the/host/scrob/data
 POSTGRES_PASSWORD=<a password>
 SECRET_KEY=<openssl rand -hex 32>
 docker compose -f docker-compose.scrunchee.yml up -d
 ```
+
+Optional: `SCROB_PORT` (default 7330), `TZ`, `APP_VERSION` (shown on the About page when the image is built from a checkout with `--build`) and `DATABASE_URL` (only to use a different database).
 
 Scrob migrates its database on start, and a newer upstream may add migrations that cannot be undone, so take a `pg_dump` before switching an existing install to this image, and try it first on a copy.
 
