@@ -31,7 +31,7 @@ SECRET_KEY=<openssl rand -hex 32>
 docker compose -f docker-compose.scrunchee.yml up -d
 ```
 
-Optional: `SCROB_PORT` (default 7330), `TZ`, `APP_VERSION` (shown on the About page when the image is built from a checkout with `--build`) and `DATABASE_URL` (only to use a different database).
+Optional: `SCROB_CONTAINER_NAME` and `SCROB_DB_CONTAINER_NAME` (the container names, `scrob-dev` and `scrob-dev-db` by default, so you can find them in Portainer; they are fixed, so a second copy needs its own), `SCROB_PORT` (default 7330), `TZ`, `APP_VERSION` (shown on the About page when the image is built from a checkout with `--build`) and `DATABASE_URL` (only to use a different database).
 
 Scrob migrates its database on start, and a newer upstream may add migrations that cannot be undone, so take a `pg_dump` before switching an existing install to this image, and try it first on a copy.
 
