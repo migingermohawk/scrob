@@ -71,7 +71,7 @@ Scrob starts background jobs that sync with Jellyfin, Plex, Emby, Trakt, Simkl a
 
 ## The image
 
-`.github/workflows/scrunchee-image.yml` builds the image on GitHub and publishes it to the GitHub container registry as `ghcr.io/<owner>/scrob:scrunchee` (the latest build of the `scrunchee` branch), `:sha-<commit>` (that exact commit) and, for a tag named `scrunchee-v*`, a tag of that name. It runs the backend tests and the undefined-names check first, builds `linux/amd64` from the standard `Dockerfile`, and signs in with the built-in `GITHUB_TOKEN`, so no password is stored. The version shown on Scrob's About page is the upstream release it is based on plus the commit, for example `v2.34.2-scrunchee.1a2b3c4`.
+`.github/workflows/scrunchee-image.yml` builds the image on GitHub and publishes it to the GitHub container registry as `ghcr.io/<owner>/scrob:scrunchee` (the latest build of the `scrunchee` branch), `:sha-<commit>` (that exact commit) and, for a tag named `scrunchee-v*`, a tag of that name (a release tag also moves `:scrunchee`). There is no `:latest`. It runs the backend tests and the undefined-names check first, builds `linux/amd64` from the standard `Dockerfile`, and signs in with the built-in `GITHUB_TOKEN`, so no password is stored. The version shown on Scrob's About page is the upstream release it is based on plus the commit, for example `v2.34.2-scrunchee.1a2b3c4`.
 
 One-time setup on the GitHub fork:
 

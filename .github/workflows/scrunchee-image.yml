@@ -1,94 +1,97 @@
-name: Scrunchee image
-
-# Builds the fork's Docker image and publishes it to GitHub's container registry:
-#   ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
-#   ghcr.io/<owner>/scrob:sha-<commit>     that exact commit
-#   ghcr.io/<owner>/scrob:<tag>            when a tag named scrunchee-v* is pushed
-# linux/amd64 only, the standard (not omnibus) image: Scrob and PostgreSQL run as two
-# containers. Uses the built-in GITHUB_TOKEN, so no password is stored anywhere.
-#
-# Upstream's own three workflows (docker-x64.yml, docker.yml, release.yml) must be
-# disabled by file name in the fork's Actions page, or they run on this fork too.
-on:
-  push:
-    branches: [scrunchee]
-    tags: ["scrunchee-v*"]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  packages: write
-
-jobs:
-  test:
-    # Never publish from upstream itself.
-    if: github.repository != 'ellite/scrob'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      SECRET_KEY: ci-test-secret-key-that-is-at-least-32-bytes-long
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install
-        working-directory: backend
-        run: |
-          python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/deps.txt
-          pip install -r /tmp/deps.txt pytest pytest-asyncio aiosqlite pyflakes
-      - name: Undefined names
-        working-directory: backend
-        run: python check_undefined_names.py
-      - name: Backend tests
-        working-directory: backend
-        run: python -m pytest tests -q
-
-  image:
-    needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # tags, to find the upstream version this build is based on
-
-      - name: Image name and version
-        id: meta
-        run: |
-          # Image names must be lowercase; the account name may not be.
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          # The upstream release this build is based on, then the fork and commit:
-          # shown on Scrob's About page, e.g. v2.34.2-scrunchee.1a2b3c4
-          base="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo dev)"
-          echo "version=${base}-scrunchee.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: tags
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.meta.outputs.image }}
-          tags: |
-            type=raw,value=scrunchee,enable=${{ github.ref == 'refs/heads/scrunchee' }}
-            type=sha,prefix=sha-,format=short
-            type=ref,event=tag
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          labels: ${{ steps.tags.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branchname: Scrunchee image
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch# Builds the fork's Docker image and publishes it to GitHub's container registry:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch#   ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch#   ghcr.io/<owner>/scrob:sha-<commit>     that exact commit
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch#   ghcr.io/<owner>/scrob:<tag>            when a tag named scrunchee-v* is pushed
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch# linux/amd64 only, the standard (not omnibus) image: Scrob and PostgreSQL run as two
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch# containers. Uses the built-in GITHUB_TOKEN, so no password is stored anywhere.
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch#
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch# Upstream's own three workflows (docker-x64.yml, docker.yml, release.yml) must be
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch# disabled by file name in the fork's Actions page, or they run on this fork too.
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branchon:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  push:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    branches: [scrunchee]
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    tags: ["scrunchee-v*"]
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  workflow_dispatch:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branchpermissions:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  contents: read
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  packages: write
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branchjobs:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  test:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    # Never publish from upstream itself.
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    if: github.repository != 'ellite/scrob'
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    runs-on: ubuntu-latest
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    timeout-minutes: 30
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    env:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      SECRET_KEY: ci-test-secret-key-that-is-at-least-32-bytes-long
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    steps:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: actions/checkout@v4
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: actions/setup-python@v5
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        with:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          python-version: "3.12"
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - name: Install
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        working-directory: backend
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        run: |
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/deps.txt
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          pip install -r /tmp/deps.txt pytest pytest-asyncio aiosqlite pyflakes
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - name: Undefined names
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        working-directory: backend
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        run: python check_undefined_names.py
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - name: Backend tests
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        working-directory: backend
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        run: python -m pytest tests -q
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch  image:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    needs: test
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    runs-on: ubuntu-latest
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    timeout-minutes: 45
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch    steps:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: actions/checkout@v4
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        with:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          fetch-depth: 0   # tags, to find the upstream version this build is based on
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - name: Image name and version
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        id: meta
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        run: |
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          # Image names must be lowercase; the account name may not be.
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          # The upstream release this build is based on, then the fork and commit:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          # shown on Scrob's About page, e.g. v2.34.2-scrunchee.1a2b3c4
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          base="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo dev)"
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          echo "version=${base}-scrunchee.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: docker/setup-buildx-action@v3
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: docker/login-action@v3
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        with:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          registry: ghcr.io
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          username: ${{ github.actor }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          password: ${{ secrets.GITHUB_TOKEN }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - id: tags
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        uses: docker/metadata-action@v5
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        with:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          images: ${{ steps.meta.outputs.image }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          # No ":latest": in this account's namespace it could be taken for upstream's.
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          flavor: |
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch            latest=false
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          tags: |
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch            type=raw,value=scrunchee,enable=${{ github.ref == 'refs/heads/scrunchee' || startsWith(github.ref, 'refs/tags/scrunchee-v') }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch            type=sha,prefix=sha-,format=short
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch            type=ref,event=tag
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch      - uses: docker/build-push-action@v6
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch        with:
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          context: .
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          file: Dockerfile
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          platforms: linux/amd64
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          push: true
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          tags: ${{ steps.tags.outputs.tags }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          labels: ${{ steps.tags.outputs.labels }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          build-args: |
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch            APP_VERSION=${{ steps.meta.outputs.version }}
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          cache-from: type=gha
+ ghcr.io/<owner>/scrob:scrunchee        the latest build of the scrunchee branch          cache-to: type=gha,mode=max
