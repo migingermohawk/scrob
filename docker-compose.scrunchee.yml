@@ -13,13 +13,16 @@
 #   SCROB_PORT=7330        # optional; the port to publish on this host (default 7330)
 #   TZ=UTC                 # optional
 #   APP_VERSION=dev        # optional; shown on the About page when the image is built
+#   SCROB_CONTAINER_NAME=scrob-dev        # optional; the container names (these are the defaults)
+#   SCROB_DB_CONTAINER_NAME=scrob-dev-db
 #   DATABASE_URL=...       # optional; only to use a different database
 #
-# To run a second copy next to an existing one (for testing a change against a copy of
-# your data), give it its own folders and a different SCROB_PORT, and `docker compose -p
-# <name>` so it gets its own containers.
+# The containers have fixed names so you can find them (scrob-dev and scrob-dev-db unless you
+# set the variables above). To run a second copy next to the first, give it its own names,
+# folders and SCROB_PORT.
 services:
   scrob-db:
+    container_name: ${SCROB_DB_CONTAINER_NAME:-scrob-dev-db}
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -35,6 +38,7 @@ services:
       retries: 10
 
   scrob:
+    container_name: ${SCROB_CONTAINER_NAME:-scrob-dev}
     # The image built from this fork, for example ghcr.io/<owner>/scrob:scrunchee
     image: ${SCROB_IMAGE:?set SCROB_IMAGE to the fork's image}
     # To build it from this checkout instead (a test copy), run with --build; Portainer's
