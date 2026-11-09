@@ -95,3 +95,7 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # No build attestations: on a public repository they embed the whole push
+          # event, including the pusher's e-mail address, in the published image.
+          provenance: false
+          sbom: false
