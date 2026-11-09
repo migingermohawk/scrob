@@ -84,6 +84,12 @@ jobs:
             type=ref,event=tag
 
       - uses: docker/build-push-action@v6
+        env:
+          # Keep the push event (it names the pusher's e-mail address) out of the
+          # job log and out of the build record artifact.
+          BUILDX_METADATA_PROVENANCE: disabled
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: Dockerfile
